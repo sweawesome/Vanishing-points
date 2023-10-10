@@ -33,26 +33,131 @@ def average2DCoord(points, Inliers):
     for index in Inliers:
         error, i, j = index
         x, y, indI, indJ = points[np.where(points[:, 3] == j)][0]
-        if y < 0:
-            print("y: {} has error: {}".format(y, error))
         xSum += x
         ySum += y
     result = np.array([xSum / (Inliers.size / 3), ySum / (Inliers.size / 3)])
     return result
 
 
-def vanishingP(Lines):
+def find_siblings(line1, lines):
+    result = []
+    VH = 0
+    x1, y1, x2, y2 = line1[0]
+    if x1 != x2:
+        m1 = (y2 - y1) / (x2 - x1)
+    else:
+        m1 = 1000000
+    theta1 = np.degrees(np.arctan(m1))
+
+    if theta1 < 1 and theta1 > -1:  # vertically
+        VH = 1
+    elif theta1 < 91 and theta1 > 89:  # horizontally
+        VH = 2
+    if VH == 0:
+        return VH, result
+
+    # is this line parallel to any other line?
+    index = 0
+    for line2 in lines:
+        a1, b1, a2, b2 = line2[0]
+        if not (x1 == a1 and y1 == b1):
+            if a1 != a2:
+                m2 = (b2 - b1) / (a2 - a1)
+            else:
+                m2 = 1000000
+            theta2 = np.degrees(np.arctan(m2))
+            diff = np.abs(theta1 - theta2)
+            if diff < 1:
+                result.append(index)
+        index += 1
+    return VH, result
+
+
+def findClusters(points, known_ax, search_area):
+    guess1 = np.array([], dtype=np.float64).reshape(0, 3)  # x,y,indx, groupnr
+    guess2 = np.array([], dtype=np.float64).reshape(0, 3)
+    result = np.array([], dtype=np.float64).reshape(0, 3)
+    completed = []
+    for i in range(0, len(points)):
+        x1, y1, error = points[i]
+        neighbors = np.array([x1, y1, 1])
+        temp_Completed = [i]
+        for j in range(0, len(points)):
+            if i != j:
+                x2, y2, error = points[j]
+                dist = eucDistance(x1, y1, x2, y2)
+                if dist < search_area:
+                    neighbors = np.vstack([neighbors, np.array([x2, y2, 3])])
+                    temp_Completed.append(j)
+        if len(guess1) < len(neighbors):
+            guess1 = neighbors
+            completed = temp_Completed
+    sumx, sumy, suma = np.sum(guess1, axis=0)
+    tempAverage = np.array([sumx / len(guess1), sumy / len(guess1), 3])
+    result = np.vstack([result, tempAverage])
+    # if we have only found 1 vert/hoz axis and we have potential vanishing points left over
+    if len(known_ax) < 2 and len(guess1) < len(points - 1):
+        for i in range(0, len(points)):
+            if not (i in completed):
+                x1, y1, error = points[i]
+                neighbors = np.array([x1, y1, 2])
+                temp_Completed = [i]
+                dist_to_prev = eucDistance(tempAverage[0], tempAverage[1], x1, y1)
+                if dist_to_prev > search_area * 2:
+                    for j in range(0, len(points)):
+                        if i != j and not (j in completed):
+                            x2, y2, error = points[j]
+                            dist = eucDistance(x1, y1, x2, y2)
+                            if dist < search_area:
+                                neighbors = np.vstack(
+                                    [neighbors, np.array([x2, y2, 4])]
+                                )
+                                temp_Completed.append(j)
+                    if len(guess2) < len(neighbors):
+                        guess2 = neighbors
+                        completed = temp_Completed
+        sumx, sumy, suma = np.sum(guess2, axis=0)
+        tempAverage = np.array([sumx / len(guess2), sumy / len(guess2), 4])
+        result = np.vstack([result, tempAverage])
+        print(result)
+    return result
+
+
+def vanishingP(Lines, width, height):
+    vanishingpoints = np.array([], dtype=np.float64).reshape(0, 3)
+    CompletedLines = np.array([], dtype=np.int64).reshape(0, 2)  #
     candidates = Lines.size / 4
     print(candidates)
     completed = []
-    result = np.array([], dtype=np.float64).reshape(0, 3)
+    additional_Guesses = np.array([], dtype=np.float64).reshape(0, 3)
     averageError = np.array([], dtype=np.float64)
     # print(Lines.size)
     for i in range(0, int(candidates)):
         Line1 = Lines[i]
         completed.append(i)
+        # print(completed)
         intersections = np.array([], dtype=np.float64).reshape(0, 4)
+        VH, parallels = find_siblings(Line1, Lines)
+        if VH != 0:
+            if len(parallels) > int(len(Lines) * 0.05):
+                for j in range(0, len(parallels)):
+                    tempLine = np.array([parallels[j], VH])
+                    CompletedLines = np.vstack([CompletedLines, tempLine])
+                    completed.append(parallels[j])  # probably do not need this loop
 
+            # fig, ax = plt.subplots()
+            # plt.imshow(img)
+            # plt.xlim(-200, 1000)
+            # for j in range(0, len(parallels)):
+            #     # plt.ylim(-1000, 1000)
+            #     tempX = [Lines[parallels[j]][0][0], Lines[parallels[j]][0][2]]
+            #     tempY = [Lines[parallels[j]][0][1], Lines[parallels[j]][0][3]]
+            #     if VH == 1:
+            #         line1 = Line2D(tempX, tempY, color="b")
+            #     if VH == 2:
+            #         line1 = Line2D(tempX, tempY, color="r")
+            #     ax.add_line(line1)
+            # plt.show()
         for j in range(0, int(candidates)):
             if j not in completed:
                 intr = intersect2D(Line1, Lines[j])
@@ -121,7 +226,7 @@ def vanishingP(Lines):
         for j in range(0, int(intersections.size / 4)):
             if (
                 Line1[0][0] < intersections[j][0]
-            ):  # is the intersection behind of in front of the line segment?
+            ):  # is the intersection behind of or in front of the line segment?
                 # get euclidian distance
                 d = eucDistance(
                     Line1[0][0],
@@ -179,40 +284,41 @@ def vanishingP(Lines):
             # compare distances and group the 95th percentile of points closest to eachother
             errorV = errorV[errorV[:, 0].argsort()]
 
-            pInliers = int((errorV.size / 3) * 0.1)
+            pInliers = int((errorV.size / 3) * 0.05)
             pInliersV = np.array([], dtype=np.float64).reshape(0, 3)
             if pInliers > 1:
                 for j in range(0, pInliers):
                     pInliersV = np.vstack([pInliersV, errorV[j]])
 
-            # more outlier removal, remove points further away than the average distance from the mean coordinate point
-            # Then recalculate the mean coordinate point
-            averageError = np.mean(pInliersV, axis=0)
-            # for v in pInliersV:
-            #     error, indI, indJ = v
-            #     averageError += error
-            # img2 = img.copy()
-            # counter = 0
-            # for index in pInliersV:
-            #     error, i, j = index
-            #     x, y, indI, indJ = intersections[np.where(intersections[:, 3] == j)][0]
-            #     img2 = cv.circle(
-            #         img2,
-            #         (int(x), int(y)),
-            #         radius=4,
-            #         color=(0, 0, 10 * counter),
-            #         thickness=-1,
-            #     )
-            #     if x < 0 or y < 0 or x > 1000 or y > 560:
-            #         print("coordinates : [{},{}]".format(x, y))
-            #     counter += 1
-            # print("We should see #{} of points".format(counter))
-            # cv.imshow("Standard-Window", img2)
+                # more outlier removal, remove points further away than the average distance from the mean coordinate point
+                # Then recalculate the mean coordinate point
+                averageError = np.mean(pInliersV, axis=0)
+                # for v in pInliersV:
+                #     error, indI, indJ = v
+                #     averageError += error
+                # img2 = img.copy()
+                # counter = 0
+                # for index in pInliersV:
+                #     error, i, j = index
+                #     x, y, indI, indJ = intersections[np.where(intersections[:, 3] == j)][0]
+                #     img2 = cv.circle(
+                #         img2,
+                #         (int(x), int(y)),
+                #         radius=4,
+                #         color=(0, 0, 10 * counter),
+                #         thickness=-1,
+                #     )
+                #     if x < 0 or y < 0 or x > 1000 or y > 560:
+                #         print("coordinates : [{},{}]".format(x, y))
+                #     counter += 1
+                # print("We should see #{} of points".format(counter))
+                # cv.imshow("Standard-Window", img2)
             if pInliersV.size > 0:
                 vanishingPointGuess = average2DCoord(intersections, pInliersV)
-                for completedLines in pInliersV:
-                    error, completedI, completedJ = completedLines
-                    completed.append(completedJ)
+
+                # for completedLines in pInliersV:
+                #     error, completedI, completedJ = completedLines
+                #     # completed.append(completedJ)
 
                 # print(vanishingPointGuess[0])
                 # print(
@@ -223,17 +329,48 @@ def vanishingP(Lines):
                 # calculate mean coordinate point and output this as vanishing point
                 # print("")
         if pInliersV.size > 0:
-            tempResult = np.array(
+            tempGuess = np.array(
                 [(vanishingPointGuess[0], vanishingPointGuess[1], averageError[0])]
             )
-        result = np.vstack([result, tempResult])
+            if VH == 0:
+                tempLine = np.array([i, 0])
+                CompletedLines = np.vstack([CompletedLines, tempLine])
+                additional_Guesses = np.vstack([additional_Guesses, tempGuess])
+
     # compare distances of all potential vanishing points
     # the largest / closest / points with least error values, becomes the first vanishing point
     # the other groups have to be orthogonal to the first if they are to be vanishing points also,
     # remove the group least likely to be a vanishing point (outliers)
     # perform a least squares method on the three vanishing points to make them completely orthogonal
+    fig, ax = plt.subplots()
+    plt.imshow(img)
+    for j in range(0, len(CompletedLines)):
+        tempX = [Lines[CompletedLines[j][0]][0][0], Lines[CompletedLines[j][0]][0][2]]
+        tempY = [Lines[CompletedLines[j][0]][0][1], Lines[CompletedLines[j][0]][0][3]]
+        if CompletedLines[j][1] == 1:
+            line1 = Line2D(tempX, tempY, color="b")
+        elif CompletedLines[j][1] == 2:
+            line1 = Line2D(tempX, tempY, color="r")
+        else:
+            line1 = Line2D(tempX, tempY, color="g")
+        ax.add_line(line1)
+    plt.show()
 
-    return result
+    if 1 in CompletedLines[:, 1]:
+        vp = np.array([width / 2, 10000, 1])
+        vanishingpoints = np.vstack([vanishingpoints, vp])
+    if 2 in CompletedLines[:, 1]:
+        vp = np.array([10000, height / 2, 2])
+        vanishingpoints = np.vstack([vanishingpoints, vp])
+    if 0 in CompletedLines[:, 1]:
+        search_area = np.sqrt(pow(width, 2) + pow(height, 2)) * 0.1
+        vp = findClusters(additional_Guesses, vanishingpoints, search_area)
+        vanishingpoints = np.vstack([vanishingpoints, vp[0]])
+        if len(vp) > 1:
+            vanishingpoints = np.vstack([vanishingpoints, vp[1]])
+    print(vanishingpoints)
+    # should send out 3/4 vanishing points and the lines associated with said points., now it sends out the guesses and the vanishing points
+    return (additional_Guesses, vanishingpoints)
 
 
 def value_close(value, Line_arr):
@@ -272,17 +409,16 @@ def return_three_max_val_indices(arr):
 # img = cv.imread("building.jpg")
 # img = cv.imread("City_Scape.png")
 interp = cv.INTER_AREA
-img = cv.imread("complex.jpg")
+img = cv.imread("office1.jpg")
 
 if img is None:
     sys.exit("Could not read image.")
-np.append([1, 2, 3], [4, 5, 6])
 rows, cols, channels = img.shape
-
+height, width = img.shape[0], img.shape[1]
 gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
 blurry = cv.GaussianBlur(gray, (5, 5), 1)
 edges = cv.Canny(blurry, 70, 255, apertureSize=3, L2gradient=1)
-lines = cv.HoughLinesP(edges, 3, np.pi / 180, 100, minLineLength=80, maxLineGap=10)
+lines = cv.HoughLinesP(edges, 3, np.pi / 180, 100, minLineLength=50, maxLineGap=10)
 length = np.array([], dtype=np.float64).reshape(0, 2)
 counter = 0
 print(len(lines))
@@ -301,7 +437,7 @@ for line in lines:
 lineArray = np.array([])
 group_index = 1
 segregated_array = np.array([])
-VanishingPCoord = vanishingP(lines)
+VP_guess, VP = vanishingP(lines, width, height)
 
 for line in lines:
     x1, y1, x2, y2 = line[0]
@@ -333,34 +469,47 @@ for line in lines:
 # print(segregated_array)
 axels = return_three_max_val_indices(segregated_array)
 # print("axel indices: " + str(axels))
-for line in lineArray:
-    group, theta, x1, y1, x2, y2 = line
-    # print(group)
-    if int(group - 1) == axels[0]:
-        cv.line(img, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
-    elif int(group - 1) == axels[1]:
-        cv.line(img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-    elif int(group - 1) == axels[2]:
-        cv.line(img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
-average = np.mean(VanishingPCoord, axis=0)
-print("height: {},  width: {}".format(img.shape[0], img.shape[1]))
+# see lines with cv
+# for line in lineArray:
+#     group, theta, x1, y1, x2, y2 = line
+#     # print(group)
+#     if int(group - 1) == axels[0]:
+#         cv.line(img, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
+#     elif int(group - 1) == axels[1]:
+#         cv.line(img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+#     elif int(group - 1) == axels[2]:
+#         cv.line(img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
+# above average error
+average = np.mean(VP_guess, axis=0)
+# print("height: {},  width: {}".format(img.shape[0], img.shape[1]))
 fig, ax = plt.subplots()
-# plt.xlim(-500, img.shape[0] + 500)
-# plt.ylim(1000, -img.shape[1] - 500)
+plt.xlim(-500, img.shape[1] + 500)
+plt.ylim(img.shape[0] + 500, -500)
 plt.imshow(img, interpolation="nearest")
-for dot in VanishingPCoord:
+for dot in VP_guess:
     x, y, err = dot
-    if average[2] > err:
-        print("x : {},  y: {}".format(x, y))
-        if x < 0 or y < 0 or x > 1000 or y > 560:
-            circle = plt.Circle((x, y), 5, color="g")
-            ax.add_patch(circle)
-            print("ojojojoj")
-        else:
-            circle = plt.Circle((x, y), 5, color="b")
-            ax.add_patch(circle)
+    # if average[2] > err:
+    circle = plt.Circle((x, y), 2, color="g")
+    ax.add_patch(circle)
 
-print("height: {},  width: {}".format(img.shape[0], img.shape[1]))
+for dot in VP:
+    x, y, axis_dirr = dot
+    print("222 axis at [{}, {}]".format(x, y))
+    if axis_dirr == 1:
+        circle = plt.Circle((x, y), 7, color="b")
+        ax.add_patch(circle)
+    if axis_dirr == 2:
+        circle = plt.Circle((x, y), 7, color="r")
+        ax.add_patch(circle)
+    if axis_dirr == 3:
+        circle = plt.Circle((x, y), 10, color="g")
+        ax.add_patch(circle)
+    # is wonky
+    # if axis_dirr == 4:
+    #     circle = plt.Circle((x, y), 7, color="y")
+    #     ax.add_patch(circle)
+print("We show #{} vanishing points".format(len(VP_guess)))
+print("height: {},  width: {}".format(height, width))
 # print(lines)
 # print(segregated_array)
 cv.imshow("wind", edges)
@@ -372,4 +521,4 @@ k = cv.waitKey(0)
 # todo2 ifall den över funkar:
 # klura ut hur vi prioriterar vilka vanishing points som linjerna borde höra till. som i "Efficient Computation of Vanishing Points"
 plt.show()
-k = cv.waitKey(0)
+# k = cv.waitKey(0)
