@@ -350,14 +350,14 @@ def vanishingP(Lines, width, height):
         if CompletedLines[j][1] == 1:
             line1 = Line2D(tempX, tempY, color="b")
         elif CompletedLines[j][1] == 2:
-            line1 = Line2D(tempX, tempY, color="r")
-        else:
             line1 = Line2D(tempX, tempY, color="g")
+        else:
+            line1 = Line2D(tempX, tempY, color="r")
         ax.add_line(line1)
     plt.show()
 
     if 1 in CompletedLines[:, 1]:
-        vp = np.array([width / 2, 10000, 1])
+        vp = np.array([width / 2, -10000, 1])
         vanishingpoints = np.vstack([vanishingpoints, vp])
     if 2 in CompletedLines[:, 1]:
         vp = np.array([10000, height / 2, 2])
@@ -369,8 +369,7 @@ def vanishingP(Lines, width, height):
         if len(vp) > 1:
             vanishingpoints = np.vstack([vanishingpoints, vp[1]])
     print(vanishingpoints)
-    # should send out 3/4 vanishing points and the lines associated with said points., now it sends out the guesses and the vanishing points
-    return (additional_Guesses, vanishingpoints)
+    return (additional_Guesses, vanishingpoints, CompletedLines)
 
 
 def value_close(value, Line_arr):
@@ -382,7 +381,6 @@ def value_close(value, Line_arr):
         if abs(abs(value) - abs(saved_theta)) < 4:
             result = saved_group
             break
-    # print("group nr: " + str(result))
     if result == 0:
         result = np.max(lineArray, axis=0)[0] + 1
     return result
@@ -410,7 +408,6 @@ def return_three_max_val_indices(arr):
 # img = cv.imread("City_Scape.png")
 interp = cv.INTER_AREA
 img = cv.imread("office1.jpg")
-
 if img is None:
     sys.exit("Could not read image.")
 rows, cols, channels = img.shape
@@ -421,23 +418,10 @@ edges = cv.Canny(blurry, 70, 255, apertureSize=3, L2gradient=1)
 lines = cv.HoughLinesP(edges, 3, np.pi / 180, 100, minLineLength=50, maxLineGap=10)
 length = np.array([], dtype=np.float64).reshape(0, 2)
 counter = 0
-print(len(lines))
-for line in lines:
-    x1, y1, x2, y2 = line[0]
-    tempLength = np.array([eucDistance(x1, y1, x2, y2), counter])
-    length = np.vstack([length, tempLength])
-    counter += 1
-
-# length = length[length[:, 0].argsort()]
-# amount = int((length.size/2)*0.4)
-# mask = np.ones(len(lines))
-# for i in range(0,amount):
-
-
 lineArray = np.array([])
 group_index = 1
 segregated_array = np.array([])
-VP_guess, VP = vanishingP(lines, width, height)
+VP_Guess, VP, VP_Lines = vanishingP(lines, width, height)
 
 for line in lines:
     x1, y1, x2, y2 = line[0]
@@ -447,7 +431,6 @@ for line in lines:
         m = 1000000
     c = y2 - m * x2
     theta = np.degrees(np.arctan(m))
-    # print("theta : " + str(theta))
     if lineArray.size != 0:
         group_index = value_close(theta, lineArray)
         lineArray = np.concatenate(
@@ -465,60 +448,47 @@ for line in lines:
     else:
         segregated_array = np.append(segregated_array, [1])
 
-
-# print(segregated_array)
 axels = return_three_max_val_indices(segregated_array)
-# print("axel indices: " + str(axels))
-# see lines with cv
-# for line in lineArray:
-#     group, theta, x1, y1, x2, y2 = line
-#     # print(group)
-#     if int(group - 1) == axels[0]:
-#         cv.line(img, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
-#     elif int(group - 1) == axels[1]:
-#         cv.line(img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-#     elif int(group - 1) == axels[2]:
-#         cv.line(img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
 # above average error
-average = np.mean(VP_guess, axis=0)
-# print("height: {},  width: {}".format(img.shape[0], img.shape[1]))
+average = np.mean(VP_Guess, axis=0)
 fig, ax = plt.subplots()
-plt.xlim(-500, img.shape[1] + 500)
-plt.ylim(img.shape[0] + 500, -500)
+pad = 1000
+plt.xlim(-pad, img.shape[1] + pad)
+plt.ylim(img.shape[0] + pad, -pad)
 plt.imshow(img, interpolation="nearest")
-for dot in VP_guess:
+for dot in VP_Guess:
     x, y, err = dot
-    # if average[2] > err:
-    circle = plt.Circle((x, y), 2, color="g")
+    circle = plt.Circle((x, y), 4, alpha=0.3, color="r")
     ax.add_patch(circle)
+
+for j in range(0, len(VP_Lines)):
+    tempX = [lines[VP_Lines[j][0]][0][0], lines[VP_Lines[j][0]][0][2]]
+    tempY = [lines[VP_Lines[j][0]][0][1], lines[VP_Lines[j][0]][0][3]]
+    if VP_Lines[j][1] == 1:
+        line1 = Line2D(tempX, tempY, color="g")
+    elif VP_Lines[j][1] == 2:
+        line1 = Line2D(tempX, tempY, color="b")
+    else:
+        line1 = Line2D(tempX, tempY, color="r")
+    ax.add_line(line1)
 
 for dot in VP:
     x, y, axis_dirr = dot
-    print("222 axis at [{}, {}]".format(x, y))
     if axis_dirr == 1:
-        circle = plt.Circle((x, y), 7, color="b")
+        circle = plt.Circle((x, y), 7, color="g")
         ax.add_patch(circle)
     if axis_dirr == 2:
-        circle = plt.Circle((x, y), 7, color="r")
+        circle = plt.Circle((x, y), 7, color="b")
         ax.add_patch(circle)
     if axis_dirr == 3:
-        circle = plt.Circle((x, y), 10, color="g")
+        circle = plt.Circle((x, y), 12, color="r")
         ax.add_patch(circle)
     # is wonky
-    # if axis_dirr == 4:
-    #     circle = plt.Circle((x, y), 7, color="y")
-    #     ax.add_patch(circle)
-print("We show #{} vanishing points".format(len(VP_guess)))
+    if axis_dirr == 4:
+        circle = plt.Circle((x, y), 12, color="black")
+        ax.add_patch(circle)
+print("We show #{} vanishing points".format(len(VP_Guess)))
 print("height: {},  width: {}".format(height, width))
-# print(lines)
-# print(segregated_array)
 cv.imshow("wind", edges)
 k = cv.waitKey(0)
-# cv.imshow("wind", img)
-# k = cv.waitKey(0)
-
-# todo, fixa en bra punkt
-# todo2 ifall den över funkar:
-# klura ut hur vi prioriterar vilka vanishing points som linjerna borde höra till. som i "Efficient Computation of Vanishing Points"
 plt.show()
-# k = cv.waitKey(0)
